@@ -1,64 +1,22 @@
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
-from tryondiffusion import TryOnImagen, TryOnImagenTrainer, get_unet_by_name
+from tryondiffusion import TryOnImagen, TryOnImagenTrainer, get_unet_by_name, SyntheticTryonDataset, tryondiffusion_collate_fn
 
 TRAIN_UNET_NUMBER = 1
-BASE_UNET_IMAGE_SIZE = (128, 128)
+BASE_UNET_IMAGE_SIZE = (64, 64)
 SR_UNET_IMAGE_SIZE = (256, 256)
-BATCH_SIZE = 2
+BATCH_SIZE =2 
 GRADIENT_ACCUMULATION_STEPS = 2
-NUM_ITERATIONS = 2
-TIMESTEPS = (2, 2)
+NUM_ITERATIONS = 100
+TIMESTEPS = (1000, 1000)
 
-
-class SyntheticTryonDataset(Dataset):
-    def __init__(self, num_samples, image_size, pose_size=(18, 2)):
-        """
-        Args:
-            num_samples (int): Number of samples in the dataset.
-            image_size (tuple): The height and width of the images (height, width).
-            pose_size (tuple): The size of the pose tensors (default: (18, 2)).
-        """
-        self.num_samples = num_samples
-        self.image_size = image_size
-        self.pose_size = pose_size
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        person_image = torch.randn(3, *self.image_size)
-        ca_image = torch.randn(3, *self.image_size)
-        garment_image = torch.randn(3, *self.image_size)
-        person_pose = torch.randn(*self.pose_size)
-        garment_pose = torch.randn(*self.pose_size)
-
-        sample = {
-            "person_images": person_image,
-            "ca_images": ca_image,
-            "garment_images": garment_image,
-            "person_poses": person_pose,
-            "garment_poses": garment_pose,
-        }
-
-        return sample
-
-
-def tryondiffusion_collate_fn(batch):
-    return {
-        "person_images": torch.stack([item["person_images"] for item in batch]),
-        "ca_images": torch.stack([item["ca_images"] for item in batch]),
-        "garment_images": torch.stack([item["garment_images"] for item in batch]),
-        "person_poses": torch.stack([item["person_poses"] for item in batch]),
-        "garment_poses": torch.stack([item["garment_poses"] for item in batch]),
-    }
 
 
 def main():
     print("Instantiating the dataset and dataloader...")
     dataset = SyntheticTryonDataset(
-        num_samples=1000, image_size=SR_UNET_IMAGE_SIZE if TRAIN_UNET_NUMBER == 2 else BASE_UNET_IMAGE_SIZE
+        num_samples=500, image_size=SR_UNET_IMAGE_SIZE if TRAIN_UNET_NUMBER == 2 else BASE_UNET_IMAGE_SIZE
     )
     train_dataloader = DataLoader(
         dataset,
@@ -81,6 +39,8 @@ def main():
     print("Instantiating U-Nets...")
     base_unet = get_unet_by_name("base")
     sr_unet = get_unet_by_name("sr")
+    
+    base_unet.to('cuda')
 
     # Instantiate the Imagen model
     imagen = TryOnImagen(
@@ -93,7 +53,8 @@ def main():
     trainer = TryOnImagenTrainer(
         imagen=imagen,
         max_grad_norm=1.0,
-        accelerate_cpu=True,
+        # accelerate_cpu=True,
+        accelerate_cpu=False,
         accelerate_gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
     )
 
@@ -102,15 +63,18 @@ def main():
 
     print("Starting training loop...")
     # training loop
-    for i in range(NUM_ITERATIONS):
+    from tqdm import trange
+    for i in trange(NUM_ITERATIONS):
         # TRAINING
         loss = trainer.train_step(unet_number=TRAIN_UNET_NUMBER)
-        print(f"loss: {loss}")
-        valid_loss = trainer.valid_step(unet_number=TRAIN_UNET_NUMBER)
-        print(f"valid loss: {valid_loss}")
+        print(f"iter: {i}\nloss: {loss}")
+        if i % 10 == 0:
+            valid_loss = trainer.valid_step(unet_number=TRAIN_UNET_NUMBER)
+            print(f"valid loss: {valid_loss}")
+        
 
     # SAMPLING
-    print("Starting sampling loop...")
+    print("\n\nStarting sampling loop...")
     validation_sample = next(trainer.valid_dl_iter)
     _ = validation_sample.pop("person_images")
     imagen_sample_kwargs = dict(
@@ -122,14 +86,17 @@ def main():
         return_pil_images=True,
         use_tqdm=True,
         use_one_unet_in_gpu=True,
+        stop_at_unet_number=1
     )
     images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
-    assert len(images) == 2
-    assert len(images[0]) == BATCH_SIZE and len(images[1]) == BATCH_SIZE
+    # assert len(images) == 2
+    # assert len(images[0]) == BATCH_SIZE and len(images[1]) == BATCH_SIZE
 
-    for unet_output in images:
-        for image in unet_output:
-            image.show()
+    for idx_unet, unet_output in enumerate(images):
+        for idx_step, image in enumerate(unet_output):
+            image.save(f'{idx_unet}_{idx_step}_sample.png')
+    
+    print(len(images))
 
 
 if __name__ == "__main__":
