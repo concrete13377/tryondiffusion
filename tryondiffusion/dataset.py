@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from pathlib import Path
 from PIL import Image
 import numpy as np
 from clothing_segmentation import HumanParser
@@ -9,15 +10,38 @@ import pandas as pd
 from torchvision import transforms as T
 
 
+from controlnet_aux import OpenposeDetector
+from controlnet_aux.open_pose import HWC3, resize_image
+from diffusers.utils import load_image
+
+
+class MyOpenPoseDetector(OpenposeDetector):
+    
+    def __call__(self, input_image, detect_resolution=512, include_hand=False, include_face=False):
+       
+        if not isinstance(input_image, np.ndarray):
+            input_image = np.array(input_image, dtype=np.uint8)
+
+        input_image = HWC3(input_image)
+        input_image = resize_image(input_image, detect_resolution)
+
+        poses = self.detect_poses(input_image, include_hand, include_face)
+        
+        xy=[]
+        if len(poses)>0:
+            for point in poses[0].body.keypoints:
+                if point is not None:
+                    xy.append([point.x, point.y])
+                else:
+                    xy.append([0, 0])
+            return np.array(xy)
+        else:
+            return None
+
 
 class SyntheticTryonDataset(Dataset):
-    def __init__(self, num_samples, image_size=(64,64), pose_size=(18, 2), apply_transform=True):
-        """
-        Args:
-            num_samples (int): Number of samples in the dataset.
-            image_size (tuple): The height and width of the images (height, width).
-            pose_size (tuple): The size of the pose tensors (default: (18, 2)).
-        """
+    def __init__(self, image_size=(64,64), pose_size=(18, 2), apply_transform=True):
+
         self.human_parser = HumanParser()
         self.transform = T.Compose([
             # T.Resize(image_size),
@@ -26,14 +50,15 @@ class SyntheticTryonDataset(Dataset):
         ])
         self.apply_transform = apply_transform
         self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs.csv')
-        # self.item_ids = np.unique(self.df['item_idx'].values)
+        self.df = self.df[self.df['pose_detected']]
+        
         self.items_reverse_index = {}
         for group_idx, group in self.df.groupby(by='item_idx'):
             self.items_reverse_index[group_idx] = group['fullpath'].values        
         
-        self.num_samples = num_samples
         self.image_size = image_size
-        self.pose_size = pose_size
+        # self.pose_size = pose_size
+        self.openpose = MyOpenPoseDetector.from_pretrained("lllyasviel/ControlNet")
 
     def __len__(self):
         return len(self.items_reverse_index)
@@ -54,9 +79,8 @@ class SyntheticTryonDataset(Dataset):
         
     def prepare_pose(self, img):
         # pass
-        pose = torch.randn(*self.pose_size)
+        pose = self.openpose(img, detect_resolution=self.image_size[0])
         return pose
-
 
     def prepare_segmented_garment(self, img, hp_mask)-> np.array:
         # classes_to_rm=[4,6] 
@@ -139,6 +163,20 @@ class SyntheticTryonDataset(Dataset):
             }
         
         return sample
+    
+class SyntheticTryonDatasetFromDisk(Dataset):
+    def __init__(self, path='/mnt/datadrive/asos_dataset/prepared_64/tensors/'):
+        self.path = Path(path)
+        self.glob=sorted(self.path.rglob('*.pt'), key=lambda x: int(x.stem))
+
+    def __len__(self):
+        return len(self.glob)
+    
+    def __getitem__(self, idx):
+        tensor_path = self.glob[idx]
+        record = torch.load(tensor_path)
+        return record
+    
 
 def tryondiffusion_collate_fn(batch):
     return {
