@@ -1,3 +1,9 @@
+import wandb
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="mynewproject_name"
+)
+
 import torch
 from torch.utils.data import DataLoader
 
@@ -67,11 +73,14 @@ def main():
     for i in trange(NUM_ITERATIONS):
         # TRAINING
         loss = trainer.train_step(unet_number=TRAIN_UNET_NUMBER)
-        print(f"iter: {i}\nloss: {loss}")
+        # print(f"iter: {i}\nloss: {loss}")
+        wandb.log({"train/loss": loss})
+
         if i % 10 == 0:
             valid_loss = trainer.valid_step(unet_number=TRAIN_UNET_NUMBER)
-            print(f"valid loss: {valid_loss}")
-        
+            # print(f"valid loss: {valid_loss}")
+            wandb.log({"valid/loss": valid_loss})
+
 
     # SAMPLING
     print("\n\nStarting sampling loop...")
@@ -97,8 +106,11 @@ def main():
             image.save(f'{idx_unet}_{idx_step}_sample.png')
     
     print(len(images))
+    wandb.finish()
 
 
 if __name__ == "__main__":
     # python ./examples/test_tryon_imagen_trainer.py
     main()
+    
+    # PYTHONPATH=. python3 examples/test_tryon_imagen_trainer.py

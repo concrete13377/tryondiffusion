@@ -11,7 +11,7 @@ from torchvision import transforms as T
 
 
 class SyntheticTryonDataset(Dataset):
-    def __init__(self, num_samples, image_size=(64,64), pose_size=(18, 2)):
+    def __init__(self, num_samples, image_size=(64,64), pose_size=(18, 2), apply_transform=True):
         """
         Args:
             num_samples (int): Number of samples in the dataset.
@@ -24,7 +24,7 @@ class SyntheticTryonDataset(Dataset):
             # T.CenterCrop(image_size),
             T.ToTensor(),
         ])
-                
+        self.apply_transform = apply_transform
         self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs.csv')
         # self.item_ids = np.unique(self.df['item_idx'].values)
         self.items_reverse_index = {}
@@ -36,7 +36,7 @@ class SyntheticTryonDataset(Dataset):
         self.pose_size = pose_size
 
     def __len__(self):
-        return self.num_samples
+        return len(self.items_reverse_index)
     
     def prepare_clothing_agnostic(self, img, hp_mask)-> np.array: 
         # classes_to_rm=[4,6] 
@@ -121,7 +121,6 @@ class SyntheticTryonDataset(Dataset):
         #     "garment_poses": garment_pose,
         # }
 
-        # TODO transforms PIL Images to Tensors, Normalization
         sample = {
             "person_images": person_image_resized,
             "ca_images": Image.fromarray(ca_image.astype('uint8')).resize(self.image_size, Image.BICUBIC),
@@ -130,13 +129,14 @@ class SyntheticTryonDataset(Dataset):
             "garment_poses": garment_pose,
         }
         
-        sample = {
-            "person_images": self.transform(sample['person_images']),
-            "ca_images": self.transform(sample['ca_images']),
-            "garment_images": self.transform(sample['garment_images']),
-            "person_poses": sample['person_poses'],
-            "garment_poses": sample['garment_poses']
-        }
+        if self.apply_transform:
+            sample = {
+                "person_images": self.transform(sample['person_images']),
+                "ca_images": self.transform(sample['ca_images']),
+                "garment_images": self.transform(sample['garment_images']),
+                "person_poses": sample['person_poses'],
+                "garment_poses": sample['garment_poses']
+            }
         
         return sample
 
