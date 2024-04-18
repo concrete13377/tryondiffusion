@@ -1,3 +1,5 @@
+import pickle 
+
 import torch
 from torch.utils.data import DataLoader, Dataset
 
@@ -15,6 +17,7 @@ from controlnet_aux.open_pose import HWC3, resize_image
 from diffusers.utils import load_image
 
 
+
 class MyOpenPoseDetector(OpenposeDetector):
     
     def __call__(self, input_image, detect_resolution=512, include_hand=False, include_face=False):
@@ -26,7 +29,6 @@ class MyOpenPoseDetector(OpenposeDetector):
         input_image = resize_image(input_image, detect_resolution)
 
         poses = self.detect_poses(input_image, include_hand, include_face)
-        
         xy=[]
         if len(poses)>0:
             for point in poses[0].body.keypoints:
@@ -37,7 +39,7 @@ class MyOpenPoseDetector(OpenposeDetector):
             return np.array(xy)
         else:
             return None
-
+        
 
 class SyntheticTryonDataset(Dataset):
     def __init__(self, image_size=(64,64), pose_size=(18, 2), apply_transform=True):
@@ -50,16 +52,19 @@ class SyntheticTryonDataset(Dataset):
         ])
         self.apply_transform = apply_transform
         self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs.csv')
-        self.df = self.df[self.df['pose_detected']]
+        self.df = self.df[~self.df['pose_is_none']]
         
         self.items_reverse_index = {}
+        self.items_reverse_index_poses = {}
         for group_idx, group in self.df.groupby(by='item_idx'):
             self.items_reverse_index[group_idx] = group['fullpath'].values        
+            self.items_reverse_index_poses[group_idx] = group['pose_512'].values        
         
         self.image_size = image_size
         # self.pose_size = pose_size
         self.openpose = MyOpenPoseDetector.from_pretrained("lllyasviel/ControlNet")
 
+        
     def __len__(self):
         return len(self.items_reverse_index)
     
@@ -77,11 +82,6 @@ class SyntheticTryonDataset(Dataset):
         img[cloths_to_rm_mask!=0] = bg_color
         return img
         
-    def prepare_pose(self, img):
-        # pass
-        pose = self.openpose(img, detect_resolution=self.image_size[0])
-        return pose
-
     def prepare_segmented_garment(self, img, hp_mask)-> np.array:
         # classes_to_rm=[4,6] 
         classes_to_rm=[4]        
@@ -96,13 +96,21 @@ class SyntheticTryonDataset(Dataset):
         return img
 
     def __getitem__(self, idx):
+        if idx not in self.items_reverse_index:
+            return self.__getitem__(idx-1)    
+        items_images_list = self.items_reverse_index[idx]
+        # items_images_list_poses = self.items_reverse_index_poses[idx]
         
-        if idx in self.items_reverse_index:
-            items_images_list = self.items_reverse_index[idx]
+        if len(items_images_list)<2:
+            return self.__getitem__(idx-1)
         else:
-            items_images_list = self.items_reverse_index[idx-1]
-        img_person = items_images_list[0]
-        img_garment = items_images_list[1]
+            img_person = items_images_list[0]
+            # person_pose = items_images_list_poses[0]
+            # person_pose = pickle.loads(items_images_list_poses[0])
+            
+            img_garment = items_images_list[1]
+            # garment_pose = items_images_list_poses[1]
+            # garment_pose = pickle.loads(items_images_list_poses[1])
         
         # inputs from img1
         # noisy
@@ -110,6 +118,8 @@ class SyntheticTryonDataset(Dataset):
         # person pose
         # img = img.resize((768, 768), Image.BICUBIC)
         person_image = Image.open(img_person).convert('RGB').resize((768, 768), Image.BICUBIC)
+        op_img = load_image(img_person)
+        person_pose = self.openpose(op_img)
         # print(person_image.size)
         # .resize(self.image_size, Image.BICUBIC)
         np_person_image = np.array(person_image)
@@ -117,19 +127,19 @@ class SyntheticTryonDataset(Dataset):
         person_image_hp = self.human_parser.forward_img(person_image).squeeze(0)
         
         ca_image = self.prepare_clothing_agnostic(np_person_image, person_image_hp)
-        person_pose = self.prepare_pose(person_image_resized)
         
         # inputs from img2
         # garment pose
         # segmented garmend
         garment_image = Image.open(img_garment).convert('RGB').resize((768, 768), Image.BICUBIC)
+        op_img = load_image(img_garment)
+        garment_pose = self.openpose(op_img)
         # print(garment_image.size)
         # .resize(self.image_size, Image.BICUBIC)
         np_garment_image = np.array(garment_image)
         garment_image_hp = self.human_parser.forward_img(garment_image).squeeze(0)
         
         segmented_garment = self.prepare_segmented_garment(np_garment_image, garment_image_hp) 
-        garment_pose = self.prepare_pose(garment_image.resize(self.image_size, Image.BICUBIC))
         
         # person_image = torch.randn(3, *self.image_size)
         # ca_image = torch.randn(3, *self.image_size)
@@ -164,18 +174,28 @@ class SyntheticTryonDataset(Dataset):
         
         return sample
     
+
 class SyntheticTryonDatasetFromDisk(Dataset):
-    def __init__(self, path='/mnt/datadrive/asos_dataset/prepared_64/tensors/'):
+    def __init__(self, max_imgs, path='/mnt/datadrive/asos_dataset/prepared_64/tensors/'):
         self.path = Path(path)
         self.glob=sorted(self.path.rglob('*.pt'), key=lambda x: int(x.stem))
-
+        self.glob = self.glob[:max_imgs]
+        
     def __len__(self):
         return len(self.glob)
     
     def __getitem__(self, idx):
         tensor_path = self.glob[idx]
         record = torch.load(tensor_path)
-        return record
+        newrecord = {}
+        for k,v in record.items():
+            if 'pose' in k:
+                newrecord[k] = torch.tensor(v, dtype=torch.float)
+            else: 
+                newrecord[k]=v
+        # for k,v in newrecord.items():
+        #     print(k, type(v), v.dtype)
+        return newrecord
     
 
 def tryondiffusion_collate_fn(batch):
