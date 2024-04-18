@@ -479,10 +479,17 @@ class TryOnImagenTrainer(nn.Module):
         self.create_train_iter()
 
         kwargs = {"unet_number": unet_number, **kwargs}
-        loss = self.step_with_dl_iter(self.train_dl_iter, **kwargs)
-        self.update(unet_number=unet_number)
-        return loss
-
+        # print(unet_number)
+        # return torch.tensor(0)
+        try:
+            loss = self.step_with_dl_iter(self.train_dl_iter, **kwargs)
+            self.update(unet_number=unet_number)
+            return loss
+        except Exception as e:
+            print(e)
+            print(f'{kwargs=}')
+            return torch.tensor(0)
+            
     @torch.no_grad()
     @eval_decorator
     def valid_step(self, **kwargs):

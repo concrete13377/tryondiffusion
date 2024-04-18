@@ -15,17 +15,17 @@ BASE_UNET_IMAGE_SIZE = (64, 64)
 SR_UNET_IMAGE_SIZE = (256, 256)
 BATCH_SIZE =2 
 GRADIENT_ACCUMULATION_STEPS = 2
-NUM_ITERATIONS = 10000
+NUM_ITERATIONS = 5000
 # NUM_ITERATIONS = 10
 TIMESTEPS = (500, 500)
 
-exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/overfit_small_batch2')
+exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/overfit_small_batch4')
 exp_name.mkdir(parents=True, exist_ok=True)
 samples_path = Path(exp_name, 'samples')
 samples_path.mkdir(parents=True, exist_ok=True)
 
-save_every_steps= 1000
-sample_every = 1000
+save_every_steps=2500
+sample_every = 2500 
 
 # save_every_steps=4
 # sample_every = 4
@@ -70,7 +70,7 @@ def main():
 
     print("Instantiating the trainer...")
     trainer = TryOnImagenTrainer(
-        init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/overfit_small_batch/checkpoint.2000.pt',
+        # init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/overfit_small_batch/checkpoint.2000.pt',
         checkpoint_path=str(exp_name),
         checkpoint_every=save_every_steps,
         imagen=imagen,
@@ -99,7 +99,7 @@ def main():
             
         # if i % save_every_steps == 0:
             
-        if i % sample_every == 0:
+        if i % sample_every == 0 and i!=0 or i+1==NUM_ITERATIONS:
             validation_sample = next(trainer.valid_dl_iter)
             _ = validation_sample.pop("person_images")
             imagen_sample_kwargs = dict(
@@ -114,9 +114,7 @@ def main():
                 stop_at_unet_number=1
             )
             images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
-            # assert len(images) == 2
-            # assert len(images[0]) == BATCH_SIZE and len(images[1]) == BATCH_SIZE
-
+            
             iter_samples_path = (samples_path / str(i))
             iter_samples_path.mkdir(parents=True, exist_ok=True)
             for idx_unet, unet_output in enumerate(images):
