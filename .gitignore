@@ -3,3 +3,4 @@
 wandb/*
 *.pt
 token
+venv_new_env/
