@@ -122,7 +122,7 @@ def main():
             )
             images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
             
-            iter_samples_path = (samples_path / str(i+7800))
+            iter_samples_path = (samples_path / str(i))
             iter_samples_path.mkdir(parents=True, exist_ok=True)
             for idx_unet, unet_output in enumerate(images):
                 for idx_step, image in enumerate(unet_output):
