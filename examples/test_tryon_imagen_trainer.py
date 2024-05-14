@@ -14,18 +14,18 @@ from tryondiffusion import TryOnImagen, TryOnImagenTrainer, get_unet_by_name, Sy
 
 # TRAIN_UNET_NUMBER = 1
 TRAIN_UNET_NUMBER = 2
-BASE_UNET_IMAGE_SIZE = (64, 64)
+# BASE_UNET_IMAGE_SIZE = (64, 64)
 # SR_UNET_IMAGE_SIZE = (256, 256)
-# BASE_UNET_IMAGE_SIZE = (128, 128)
+BASE_UNET_IMAGE_SIZE = (128, 128)
 SR_UNET_IMAGE_SIZE = (256, 256)
 # BATCH_SIZE =2
-BATCH_SIZE =2
+BATCH_SIZE = 2
 GRADIENT_ACCUMULATION_STEPS = 2
 NUM_ITERATIONS = 500000
 # NUM_ITERATIONS = 10
 TIMESTEPS = (500, 500)
 
-exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64')
+exp_name = Path('/workdir/tryondiffusion/experiments/small200_srunet256_a10040gb')
 exp_name.mkdir(parents=True, exist_ok=True)
 samples_path = Path(exp_name, 'samples')
 samples_path.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def main():
     # dataset = SyntheticTryonDataset(
     #     num_samples=500, image_size=SR_UNET_IMAGE_SIZE if TRAIN_UNET_NUMBER == 2 else BASE_UNET_IMAGE_SIZE
     # )
-    dataset = SyntheticTryonDatasetFromDisk(200)
+    dataset = SyntheticTryonDatasetFromDisk(400)
     print(len(dataset))
     train_dataloader = DataLoader(
         dataset,
@@ -78,7 +78,8 @@ def main():
 
     print("Instantiating the trainer...")
     trainer = TryOnImagenTrainer(
-        init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64/checkpoint.139500.pt',
+        max_checkpoints_keep=3,
+        init_checkpoint_path='/workdir/srunet-142500.pt',
         checkpoint_path=str(exp_name),
         checkpoint_every=save_every_steps,
         imagen=imagen,
@@ -100,34 +101,45 @@ def main():
         # print(f"iter: {i}\nloss: {loss}")
         wandb.log({"train/loss": loss})
 
+
         if i % 10 == 0:
             valid_loss = trainer.valid_step(unet_number=TRAIN_UNET_NUMBER)
             # print(f"valid loss: {valid_loss}")
             wandb.log({"valid/loss": valid_loss})
             
         # if i % save_every_steps == 0:
+        if i % save_every_steps == 0 and i!=0 or i+1==NUM_ITERATIONS:
+             x = Path('/workdir/tryondiffusion/experiments/small200_srunet256_a10040gb').rglob('*.pt')
+             y = list(sorted(x, key=lambda x: int(x.name.split('.')[1])))
+             if len(y) >2:
+                for jjj in y[:-2]:
+                    jjj.unlink()
+
+        try:
+            if i % sample_every == 0 and i!=0 or i+1==NUM_ITERATIONS:
+                validation_sample = next(trainer.valid_dl_iter)
+                _ = validation_sample.pop("person_images")
+                imagen_sample_kwargs = dict(
+                    **validation_sample,
+                    batch_size=BATCH_SIZE,
+                    cond_scale=2.0,
+                    start_at_unet_number=2,
+                    return_all_unet_outputs=True,
+                    return_pil_images=True,
+                    use_tqdm=True,
+                    use_one_unet_in_gpu=True,
+                    stop_at_unet_number=2
+                )
+                images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
+                
+                iter_samples_path = (samples_path / str(i+142500))
+                iter_samples_path.mkdir(parents=True, exist_ok=True)
+                for idx_unet, unet_output in enumerate(images):
+                    for idx_step, image in enumerate(unet_output):
+                        image.save(str(iter_samples_path / f'{idx_unet}_{idx_step}_sample.png'))
+        except Exception as e:
+            print(e)
             
-        if i % sample_every == 0 and i!=0 or i+1==NUM_ITERATIONS:
-            validation_sample = next(trainer.valid_dl_iter)
-            _ = validation_sample.pop("person_images")
-            imagen_sample_kwargs = dict(
-                **validation_sample,
-                batch_size=BATCH_SIZE,
-                cond_scale=2.0,
-                start_at_unet_number=1,
-                return_all_unet_outputs=True,
-                return_pil_images=True,
-                use_tqdm=True,
-                use_one_unet_in_gpu=True,
-                stop_at_unet_number=2
-            )
-            images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
-            
-            iter_samples_path = (samples_path / str(i+140000))
-            iter_samples_path.mkdir(parents=True, exist_ok=True)
-            for idx_unet, unet_output in enumerate(images):
-                for idx_step, image in enumerate(unet_output):
-                    image.save(str(iter_samples_path / f'{idx_unet}_{idx_step}_sample.png'))
     wandb.finish()
 
 
