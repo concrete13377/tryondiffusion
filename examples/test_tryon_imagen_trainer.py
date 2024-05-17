@@ -12,20 +12,20 @@ from torch.utils.data import DataLoader
 # run pip install mediapipe
 from tryondiffusion import TryOnImagen, TryOnImagenTrainer, get_unet_by_name, SyntheticTryonDataset, tryondiffusion_collate_fn, SyntheticTryonDatasetFromDisk
 
-# TRAIN_UNET_NUMBER = 1
-TRAIN_UNET_NUMBER = 2
-BASE_UNET_IMAGE_SIZE = (64, 64)
+TRAIN_UNET_NUMBER = 1
+# TRAIN_UNET_NUMBER = 2
+# BASE_UNET_IMAGE_SIZE = (64, 64)
 # SR_UNET_IMAGE_SIZE = (256, 256)
-# BASE_UNET_IMAGE_SIZE = (128, 128)
+BASE_UNET_IMAGE_SIZE = (128, 128)
 SR_UNET_IMAGE_SIZE = (256, 256)
 # BATCH_SIZE =2
-BATCH_SIZE =2
+BATCH_SIZE =1
 GRADIENT_ACCUMULATION_STEPS = 2
 NUM_ITERATIONS = 500000
 # NUM_ITERATIONS = 10
 TIMESTEPS = (500, 500)
 
-exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64')
+exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/dresscode_unet128')
 exp_name.mkdir(parents=True, exist_ok=True)
 samples_path = Path(exp_name, 'samples')
 samples_path.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def main():
     # dataset = SyntheticTryonDataset(
     #     num_samples=500, image_size=SR_UNET_IMAGE_SIZE if TRAIN_UNET_NUMBER == 2 else BASE_UNET_IMAGE_SIZE
     # )
-    dataset = SyntheticTryonDatasetFromDisk(200)
+    dataset = SyntheticTryonDatasetFromDisk()
     print(len(dataset))
     train_dataloader = DataLoader(
         dataset,
@@ -78,7 +78,7 @@ def main():
 
     print("Instantiating the trainer...")
     trainer = TryOnImagenTrainer(
-        init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64/checkpoint.139500.pt',
+        # init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64/checkpoint.139500.pt',
         checkpoint_path=str(exp_name),
         checkpoint_every=save_every_steps,
         imagen=imagen,
@@ -123,7 +123,7 @@ def main():
             )
             images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
             
-            iter_samples_path = (samples_path / str(i+140000))
+            iter_samples_path = (samples_path / str(i))
             iter_samples_path.mkdir(parents=True, exist_ok=True)
             for idx_unet, unet_output in enumerate(images):
                 for idx_step, image in enumerate(unet_output):
