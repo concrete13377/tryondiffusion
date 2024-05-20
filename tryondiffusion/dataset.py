@@ -177,7 +177,7 @@ class SyntheticTryonDataset(Dataset):
 
 class SyntheticTryonDatasetFromDisk(Dataset):
     # def __init__(self, max_imgs, path='/mnt/datadrive/asos_dataset/prepared_256/tensors/'):
-    def __init__(self, max_imgs=None, path='/mnt/datadrive/dress_code/prepared_128/tensors/'):
+    def __init__(self, max_imgs=None, path='/workdir/dataset/dress_code/tensors'):
         self.path = Path(path)
         self.glob=sorted(self.path.rglob('*.pt'), key=lambda x: int(x.stem))
         if max_imgs is not None:

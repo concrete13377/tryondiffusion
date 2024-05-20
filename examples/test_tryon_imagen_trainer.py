@@ -19,13 +19,13 @@ TRAIN_UNET_NUMBER = 1
 BASE_UNET_IMAGE_SIZE = (128, 128)
 SR_UNET_IMAGE_SIZE = (256, 256)
 # BATCH_SIZE =2
-BATCH_SIZE =1
+BATCH_SIZE = 16
 GRADIENT_ACCUMULATION_STEPS = 2
 NUM_ITERATIONS = 500000
 # NUM_ITERATIONS = 10
 TIMESTEPS = (500, 500)
 
-exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/dresscode_unet128')
+exp_name = Path('experiments/dresscode_unet128_a100_80gb')
 exp_name.mkdir(parents=True, exist_ok=True)
 samples_path = Path(exp_name, 'samples')
 samples_path.mkdir(parents=True, exist_ok=True)
@@ -119,11 +119,11 @@ def main():
                 return_pil_images=True,
                 use_tqdm=True,
                 use_one_unet_in_gpu=True,
-                stop_at_unet_number=2
+                stop_at_unet_number=1
             )
             images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
             
-            iter_samples_path = (samples_path / str(i))
+            iter_samples_path = (samples_path / str(i+76000))
             iter_samples_path.mkdir(parents=True, exist_ok=True)
             for idx_unet, unet_output in enumerate(images):
                 for idx_step, image in enumerate(unet_output):
