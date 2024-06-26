@@ -18,14 +18,14 @@ TRAIN_UNET_NUMBER = 1
 # SR_UNET_IMAGE_SIZE = (256, 256)
 BASE_UNET_IMAGE_SIZE = (128, 128)
 SR_UNET_IMAGE_SIZE = (256, 256)
-# BATCH_SIZE =2
-BATCH_SIZE =1
+BATCH_SIZE =4
+# BATCH_SIZE =1
 GRADIENT_ACCUMULATION_STEPS = 2
 NUM_ITERATIONS = 500000
 # NUM_ITERATIONS = 10
 TIMESTEPS = (500, 500)
 
-exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/dresscode_unet128')
+exp_name = Path('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/dresscode_unet128_continue_experimentfroma100')
 exp_name.mkdir(parents=True, exist_ok=True)
 samples_path = Path(exp_name, 'samples')
 samples_path.mkdir(parents=True, exist_ok=True)
@@ -79,6 +79,7 @@ def main():
     print("Instantiating the trainer...")
     trainer = TryOnImagenTrainer(
         # init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64/checkpoint.139500.pt',
+        init_checkpoint_path= "/mnt/datadrive/checkpoints/128/checkpoint_dresscode_139500.pt",
         checkpoint_path=str(exp_name),
         checkpoint_every=save_every_steps,
         imagen=imagen,
@@ -119,7 +120,7 @@ def main():
                 return_pil_images=True,
                 use_tqdm=True,
                 use_one_unet_in_gpu=True,
-                stop_at_unet_number=2
+                stop_at_unet_number=1
             )
             images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
             
