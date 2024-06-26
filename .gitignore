@@ -4,3 +4,4 @@ wandb/*
 *.pt
 token
 venv_new_env/
+venv_tryon/
