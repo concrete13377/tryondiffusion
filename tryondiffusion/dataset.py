@@ -41,9 +41,10 @@ class MyOpenPoseDetector(OpenposeDetector):
             return None
         
 
+import itertools
 class SyntheticTryonDataset(Dataset):
     def __init__(self, image_size=(64,64), pose_size=(18, 2), apply_transform=True):
-
+        self.cache = {}
         self.human_parser = HumanParser()
         self.transform = T.Compose([
             # T.Resize(image_size),
@@ -51,22 +52,32 @@ class SyntheticTryonDataset(Dataset):
             T.ToTensor(),
         ])
         self.apply_transform = apply_transform
-        self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs.csv')
+        # self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs.csv')
+        self.df = pd.read_csv('/home/roman/tryondiffusion_implementation/tryondiffusion_danny/all_imgs_clean_80756_total.csv')
+        print(len(self.df))
         self.df = self.df[~self.df['pose_is_none']]
-        
+        print(len(self.df))
         self.items_reverse_index = {}
         self.items_reverse_index_poses = {}
         for group_idx, group in self.df.groupby(by='item_idx'):
-            self.items_reverse_index[group_idx] = group['fullpath'].values        
-            self.items_reverse_index_poses[group_idx] = group['pose_512'].values        
-        
+            self.items_reverse_index[group_idx] = [{"fullpath":fp, "pose_512":pose} for fp, pose in zip(group['fullpath'].values, group['pose_512'].values)]        
+
+        self.items_reverse_index3 = {}
+        key_idx=0
+        for k,v in self.items_reverse_index.items():
+            permutations = list(itertools.permutations(v, 2))
+            for i in permutations:
+                self.items_reverse_index3[key_idx] = i
+                key_idx+=1
+
+        print(len(self.items_reverse_index3))
         self.image_size = image_size
         # self.pose_size = pose_size
         self.openpose = MyOpenPoseDetector.from_pretrained("lllyasviel/ControlNet")
 
         
     def __len__(self):
-        return len(self.items_reverse_index)
+        return len(self.items_reverse_index3)
     
     def prepare_clothing_agnostic(self, img, hp_mask)-> np.array: 
         # classes_to_rm=[4,6] 
@@ -96,81 +107,74 @@ class SyntheticTryonDataset(Dataset):
         return img
 
     def __getitem__(self, idx):
-        if idx not in self.items_reverse_index:
-            return self.__getitem__(idx-1)    
-        items_images_list = self.items_reverse_index[idx]
-        # items_images_list_poses = self.items_reverse_index_poses[idx]
+        item = self.items_reverse_index3[idx]
+        img_person = item[0]['fullpath']
+        person_dict = None
+        if img_person in self.cache:
+            person_dict = self.cache[img_person]
+        # person_pose = item[0]['pose_512']
+        # person_pose = pickle.loads(person_pose)
+
+        img_garment = item[1]['fullpath']
+        garment_dict = None
+        if img_garment in self.cache:
+            garment_dict = self.cache[img_garment]
         
-        if len(items_images_list)<2:
-            return self.__getitem__(idx-1)
-        else:
-            img_person = items_images_list[0]
-            # person_pose = items_images_list_poses[0]
-            # person_pose = pickle.loads(items_images_list_poses[0])
+        if person_dict is None:
+            person_image = Image.open(img_person).convert('RGB').resize((768, 768), Image.BICUBIC)
+            op_img = load_image(img_person)
+            person_pose = self.openpose(op_img)
             
-            img_garment = items_images_list[1]
-            # garment_pose = items_images_list_poses[1]
-            # garment_pose = pickle.loads(items_images_list_poses[1])
+            np_person_image = np.array(person_image)
+            person_image_resized = person_image.resize(self.image_size, Image.BICUBIC)
+            person_image_hp = self.human_parser.forward_img(person_image).squeeze(0)
+            
+            ca_image = self.prepare_clothing_agnostic(np_person_image, person_image_hp)
+
+            person_dict = {
+                "person_images": self.transform(person_image_resized),
+                "ca_images": self.transform(Image.fromarray(ca_image.astype('uint8')).resize(self.image_size, Image.BICUBIC)),
+                "person_poses": person_pose
+            }
+            self.cache[img_person] = person_dict
         
-        # inputs from img1
-        # noisy
-        # clothing agnostic
-        # person pose
-        # img = img.resize((768, 768), Image.BICUBIC)
-        person_image = Image.open(img_person).convert('RGB').resize((768, 768), Image.BICUBIC)
-        op_img = load_image(img_person)
-        person_pose = self.openpose(op_img)
-        # print(person_image.size)
-        # .resize(self.image_size, Image.BICUBIC)
-        np_person_image = np.array(person_image)
-        person_image_resized = person_image.resize(self.image_size, Image.BICUBIC)
-        person_image_hp = self.human_parser.forward_img(person_image).squeeze(0)
-        
-        ca_image = self.prepare_clothing_agnostic(np_person_image, person_image_hp)
-        
-        # inputs from img2
-        # garment pose
-        # segmented garmend
-        garment_image = Image.open(img_garment).convert('RGB').resize((768, 768), Image.BICUBIC)
-        op_img = load_image(img_garment)
-        garment_pose = self.openpose(op_img)
-        # print(garment_image.size)
-        # .resize(self.image_size, Image.BICUBIC)
-        np_garment_image = np.array(garment_image)
-        garment_image_hp = self.human_parser.forward_img(garment_image).squeeze(0)
-        
-        segmented_garment = self.prepare_segmented_garment(np_garment_image, garment_image_hp) 
-        
-        # person_image = torch.randn(3, *self.image_size)
-        # ca_image = torch.randn(3, *self.image_size)
-        # garment_image = torch.randn(3, *self.image_size)
-        # person_pose = torch.randn(*self.pose_size)
-        # garment_pose = torch.randn(*self.pose_size)
+        if garment_dict is None:
+            garment_image = Image.open(img_garment).convert('RGB').resize((768, 768), Image.BICUBIC)
+            op_img = load_image(img_garment)
+            garment_pose  = self.openpose(op_img)
+            
+            np_garment_image = np.array(garment_image)
+            garment_image_hp = self.human_parser.forward_img(garment_image).squeeze(0)
+            
+            segmented_garment = self.prepare_segmented_garment(np_garment_image, garment_image_hp) 
+
+            garment_dict = {
+                "garment_images": self.transform(Image.fromarray(segmented_garment.astype('uint8')).resize(self.image_size, Image.BICUBIC)),
+                "garment_poses": garment_pose    
+            }
+            self.cache[img_garment] = garment_dict
+
+
 
         # sample = {
-        #     "person_images": person_image,
-        #     "ca_images": ca_image,
-        #     "garment_images": garment_image,
-        #     "person_poses": person_pose,
-        #     "garment_poses": garment_pose,
+            # "person_images": person_image_resized,
+            # "ca_images": Image.fromarray(ca_image.astype('uint8')).resize(self.image_size, Image.BICUBIC),
+            # "garment_images": Image.fromarray(segmented_garment.astype('uint8')).resize(self.image_size, Image.BICUBIC),
+            # "person_poses": person_pose,
+            # "garment_poses": garment_pose,
         # }
-
         sample = {
-            "person_images": person_image_resized,
-            "ca_images": Image.fromarray(ca_image.astype('uint8')).resize(self.image_size, Image.BICUBIC),
-            "garment_images": Image.fromarray(segmented_garment.astype('uint8')).resize(self.image_size, Image.BICUBIC),
-            "person_poses": person_pose,
-            "garment_poses": garment_pose,
+            **person_dict, **garment_dict
         }
         
-        if self.apply_transform:
-            sample = {
-                "person_images": self.transform(sample['person_images']),
-                "ca_images": self.transform(sample['ca_images']),
-                "garment_images": self.transform(sample['garment_images']),
-                "person_poses": sample['person_poses'],
-                "garment_poses": sample['garment_poses']
-            }
+        # if self.apply_transform:
+        #     sample = {
+        #         "person_images": self.transform(sample['person_images']),
+        #         "ca_images": self.transform(sample['ca_images']),
+        #         "garment_images": self.transform(sample['garment_images']),
+        #         "person_poses": sample['person_poses'],
+        #         "garment_poses": sample['garment_poses']
+        #     }
         
         return sample
     
