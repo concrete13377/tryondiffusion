@@ -1,0 +1,142 @@
+from pathlib import Path
+from torch.utils.data import DataLoader
+from matplotlib import pyplot as plt
+
+# run something pip related to fix reqs
+# run pip install mediapipe
+from tryondiffusion import TryOnImagen, TryOnImagenTrainer, get_unet_by_name, tryondiffusion_collate_fn, SyntheticTryonDatasetFromDisk
+
+TRAIN_UNET_NUMBER = 1
+# TRAIN_UNET_NUMBER = 2
+# BASE_UNET_IMAGE_SIZE = (64, 64)
+# SR_UNET_IMAGE_SIZE = (256, 256)
+BASE_UNET_IMAGE_SIZE = (128, 128)
+SR_UNET_IMAGE_SIZE = (256, 256)
+BATCH_SIZE = 4
+# BATCH_SIZE =1
+GRADIENT_ACCUMULATION_STEPS = 2
+NUM_ITERATIONS = 500000
+# NUM_ITERATIONS = 10
+TIMESTEPS = (1000, 1000)
+
+# exp_name = Path('/mnt/datadrive/experiments/newalgo')
+exp_name = Path('/mnt/datadrive/experiments/40k_0109')
+exp_name.mkdir(parents=True, exist_ok=True)
+samples_path = Path(exp_name, 'samples_big')
+samples_path.mkdir(parents=True, exist_ok=True)
+
+# save_every_steps=500
+sample_every = 1
+
+# save_every_steps=4
+# sample_every = 4
+
+def main():
+    print("Instantiating the dataset and dataloader...")
+    # dataset = SyntheticTryonDataset(
+    #     num_samples=500, image_size=SR_UNET_IMAGE_SIZE if TRAIN_UNET_NUMBER == 2 else BASE_UNET_IMAGE_SIZE
+    # )
+    dataset = SyntheticTryonDatasetFromDisk()
+    print(len(dataset))
+    train_dataloader = DataLoader(
+        dataset,
+        num_workers=1,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        collate_fn=tryondiffusion_collate_fn,
+    )
+    validation_dataloader = DataLoader(
+        dataset,
+        num_workers=1,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        collate_fn=tryondiffusion_collate_fn,
+    )
+    print("Checking the dataset and dataloader...")
+    sample = next(iter(train_dataloader))
+    for k, v in sample.items():
+        print(f"{k}: {v.shape}")
+
+    # Instantiate the unets
+    print("Instantiating U-Nets...")
+    base_unet = get_unet_by_name("base")
+    sr_unet = get_unet_by_name("sr")
+    
+    base_unet.to('cuda')
+
+    # Instantiate the Imagen model
+    imagen = TryOnImagen(
+        unets=(base_unet, sr_unet),
+        image_sizes=(BASE_UNET_IMAGE_SIZE, SR_UNET_IMAGE_SIZE),
+        timesteps=TIMESTEPS,
+    )
+
+    print("Instantiating the trainer...")
+    trainer = TryOnImagenTrainer(
+        # init_checkpoint_path='/home/roman/tryondiffusion_implementation/tryondiffusion_danny/experiments/small200_unet+sr_64/checkpoint.139500.pt',
+        # init_checkpoint_path= "/mnt/datadrive/checkpoints/128/checkpoint_dresscode_139500.pt",
+        checkpoint_path=str(exp_name),
+        checkpoint_every=10000000000000000,
+        imagen=imagen,
+        max_grad_norm=1.0,
+        # accelerate_cpu=True,
+        accelerate_cpu=False,
+        accelerate_gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
+    )
+
+    trainer.add_train_dataloader(train_dataloader)
+    trainer.add_valid_dataloader(validation_dataloader)
+
+    print("Starting training loop...")
+    # training loop
+    from tqdm import trange
+    for i in trange(NUM_ITERATIONS):
+        # TRAINING
+        loss = trainer.train_step(unet_number=TRAIN_UNET_NUMBER)
+        print(f"iter: {i}\nloss: {loss}")
+        # wandb.log({"train/loss": loss})
+
+        valid_loss = trainer.valid_step(unet_number=TRAIN_UNET_NUMBER)
+        #     # print(f"valid loss: {valid_loss}")
+        #     wandb.log({"valid/loss": valid_loss})
+            
+        # if i % save_every_steps == 0:
+
+        # if i % sample_every == 0 and i!=0 or i+1==NUM_ITERATIONS:
+        validation_sample = next(trainer.valid_dl_iter)
+        # for k,v in validation_sample.items():
+        #     print(k, v.shape)
+        person_images = validation_sample.pop("person_images")
+        imagen_sample_kwargs = dict(
+            **validation_sample,
+            batch_size=BATCH_SIZE,
+            cond_scale=2.0,
+            start_at_unet_number=1,
+            return_all_unet_outputs=True,
+            return_pil_images=True,
+            use_tqdm=True,
+            use_one_unet_in_gpu=True,
+            stop_at_unet_number=1
+        )
+        images = trainer.sample(**imagen_sample_kwargs)  # returns List[Image]
+
+        iter_samples_path = (samples_path / str(i))
+        iter_samples_path.mkdir(parents=True, exist_ok=True)
+        for idx_unet, unet_output in enumerate(images):
+            for idx_step, image in enumerate(unet_output):
+                ca = validation_sample['ca_images'][idx_step].permute(1,2,0).numpy()
+                ga = validation_sample['garment_images'][idx_step].permute(1,2,0).numpy()
+                pa = person_images[idx_step].permute(1,2,0).numpy()
+
+                plt.imsave(str(iter_samples_path / f'ca_{idx_unet}_{idx_step}_sample.png'), ca)
+                plt.imsave(str(iter_samples_path / f'ga_{idx_unet}_{idx_step}_sample.png'), ga)
+                plt.imsave(str(iter_samples_path / f'pa_{idx_unet}_{idx_step}_sample.png'), pa)
+                
+                image.save(str(iter_samples_path / f'{idx_unet}_{idx_step}_sample.png'))
+        # raise ValueError('fddf')
+
+if __name__ == "__main__":
+    # python ./examples/test_tryon_imagen_trainer.py
+    main()
+    
+    # PYTHONPATH=. python3 examples/test_tryon_imagen_trainer.py
